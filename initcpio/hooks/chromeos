@@ -1,0 +1,12 @@
+#!/bin/ash
+
+run_hook() {
+    
+    # Check if chromeroot kernel parameter was specified and update the root variable accordingly
+    # so that the correct root partition is mounted
+    
+    if [[ "$chromeroot" ]]; then
+        root=$chromeroot
+    fi
+
+}
