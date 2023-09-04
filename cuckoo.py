@@ -6,6 +6,7 @@ import shutil
 import sys
 import datetime
 import subprocess
+import math
 
 from configobj import ConfigObj
 
@@ -30,6 +31,19 @@ alg_ids = {'RSA1024 SHA1': 0,
            'RSA8192 SHA1': 9,
            'RSA8192 SHA256': 10,
            'RSA8192 SHA512': 11}
+
+# relevant guids
+guids = {'kernel': 'FE3A2A5D-4F32-41A7-B725-ACCC3285A309',
+         'rootfs': '3CB8E202-3B7E-47DD-8A3C-7FF2A13CFCEC',
+         'firmware': 'CAB6E88E-ABF3-4102-A07A-D4BB9BE3C1D3',
+         'future': '2E0A753D-9E48-43B0-8337-B15192CB1B5E',
+         'minios': '09845860-705F-4BB5-B16C-8A8A099CAF52',
+         'hibernate': '3F0F8318-F146-4E6B-8222-C28C8F02E0D5',
+         'basicdata': 'EBD0A0A2-B9E5-4433-87C0-68B6B72699C7',
+         'dm-crypt': '7FFEC5C9-2D00-49B7-8941-3EA10A5586B7',
+         'luks': 'CA7D7CCB-63ED-4C53-861C-1742536059CC',
+         'efi': 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B'}
+
 
 # Function to generate keys
 def gen_keys(key_dir, keys, keyblocks):
@@ -87,7 +101,129 @@ def gen_keys(key_dir, keys, keyblocks):
     def gen_kernel_files(key_dir, kernels):
         pass
 
+def create_device_layout(device, parts):
 
+    # Get size of device
+    (ex, out) = subprocess.getstatusoutput(f"blockdev --getsz {device[0]}") 
+
+    # If exit code is not zero we have to display the error message and exit
+    if ex:
+        print(f">>> Error on finding size of device {device[0]}:")
+        print(out)
+        return
+
+    # If out can be converted to int we can continue, else print out and exit
+    sz = 0
+    try:
+        sz = int(out)
+    except ValueError:
+        print(f">>> Error on finding size of device {device[0]}:")
+        print(out)
+        return
+
+    print("label: gpt\nunit: sectors\nsector-size: 512")
+
+    # starting position and end position
+    # => we need to leave space for the partition headers in front and at the end
+    # also we need to align every partition to 2048 sectors (1Mib) => start is at 2048 sectors
+    # end is at size - 34 because the end of the gpt is always 34 sectors long
+    start = 2048 
+    end = sz - 34
+
+    # then we create a one block large state partition wich is needed for chromebooks to boot from the device
+    print(f"start={start}, size=2048, type={guids['basicdata']}, name=STATE")
+
+    start = start + 2048 
+
+    for partition in parts:
+
+        p_type = parts[partition]["type"]
+        p_size = int(parts[partition]["size"])
+
+        # if we have a shorthand for a guid convert that to the long format
+        # else: use whatever input we got and pray that sfdisk understands it
+        if p_type in guids:
+            p_type = guids[p_type]
+
+        # partition sizes should not be zero
+        if p_size == 0:
+            print(f">>> Error: size of partition {partition} should not equal 0")
+            return
+
+        # If size is negative just use the remaining space
+        if p_size < 0:
+            p_size = end - start
+
+        # Also we need to check if the partition is too large
+        if start + p_size > end:
+            print(f">>> Error: No space left on device")
+            return
+
+        print(f"start={start}, size={p_size}, type={p_type}, name={partition}", end='')
+
+        # Handle kernel partition attributes
+        if p_type == guids["kernel"]:
+            priority = int(parts[partition]["priority"])
+            successfull = bool(int(parts[partition]["successfull"]))
+            tries = int(parts[partition]["tries"])
+
+            # Make sure that priority and tries are between 0 and 15
+            if priority < 0 and priority > 15:
+                print("")
+                print(f">>> Error: priority flag for partition {partition} must be between 0 and 15")
+                return
+
+            if tries < 0 and tries > 15:
+                print("")
+                print(f">>> Error: tries flag for partition {partition} must be between 0 and 15")
+                return
+            
+            # If priority is 0, tries is 0 and successfull is 0 we don't need to append anything
+            if priority != 0 or tries != 0 or successfull:
+
+                s = ", attrs=\"GUID:"
+
+                # we need to create a bit mask as described in https://chromium.googlesource.com/chromiumos/docs/+/head/disk_format.md#selecting-the-kernel
+                
+                # before creating the bitmask we must change the endianess
+                # of both priority and tries (required by gpt)
+
+                # since have to set 9 bits shift priority by 5
+                bit_mask = int('{:04b}'.format(priority)[::-1], 2) << 5
+
+                # the next 4 bits are the tries bits => shift tries by 1 and or the result to the bit_mask
+                bit_mask |= int('{:04b}'.format(tries)[::-1], 2) << 1
+
+                # finally OR the successfull flag
+                bit_mask |= successfull
+
+                # loop from 48 to 56 and add correct bit numbers to s
+                j = 0b100000000 
+                for i in range(48, 57):
+
+                    if bit_mask & j:
+                        s += f"{i},"
+
+                    j >>= 1
+
+                # Remove remaining , and print resulting string
+                s = s[:-1]
+
+                print(f"{s}\"", end='')
+        print("")
+
+        # update start for next partition
+        start = start + p_size
+    
+        # check if start is 1Mib aligned
+        if start % 2048 != 0:
+
+            # new start is at the next multiple of 2048
+            # 1. integer divide start by 2048 to get the quantity of fully occupied 2048 chunks
+            # 2. add 1 so that we get the next entirely unoccupied chung
+            # 3. multiply with 2048 to get the result in sectors
+            start = ((start // 2048) + 1) * 2048
+        
 
 if __name__ == '__main__':
 
@@ -104,6 +240,7 @@ if __name__ == '__main__':
                                      description = "A tool to make managing linux installations on chromebooks easier")
 
     parser.add_argument('-g', '--generate-keys', action = 'store_true', help = f'Generate keys based on {KERNELTOOL_CONFIG}')
+    parser.add_argument('-p', '--device-layout', metavar = 'DEVICE', nargs = 1, action = 'store', help = f"Generate layout file for formatting the specified device (i.e. /dev/sda) based on {KERNELTOOL_CONFIG}")
 
     args = parser.parse_args()
 
@@ -113,3 +250,7 @@ if __name__ == '__main__':
                  config['VERIFIED_BOOT']['KEYS'],
                  config['VERIFIED_BOOT']['KEYBLOCKS'])
 
+    elif args.device_layout:
+
+        create_device_layout(args.device_layout,
+                             config['PARTITIONS'])
