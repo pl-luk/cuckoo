@@ -98,8 +98,84 @@ def gen_keys(key_dir, keys, keyblocks):
         subprocess.run(["futility", "vbutil_keyblock", "--pack", f"{keyblock}.keyblock", "--flags", f"{keyblocks[keyblock]['flags']}", "--datapubkey",
                         f"{keyblocks[keyblock]['datapubkey']}.vbpubk", "--signprivate", f"{keyblocks[keyblock]['signprivate']}.vbprivk"], check = True)
 
-    def gen_kernel_files(key_dir, kernels):
-        pass
+def gen_kernel_files(key_dir, parts):
+
+    for partition in parts:
+
+        p_type = parts[partition]["type"]
+
+        # Process only kernel partitions
+        if p_type == 'kernel' or p_type == guids['kernel']:
+            
+            print(f">>> Generating kernel file for {partition}...")
+            
+            p_size = int(parts[partition]["size"])
+            k_bZ = parts[partition]["bzImage"]
+            k_conf = parts[partition]["config"]
+            k_signp = parts[partition]["signprivate"]
+            k_keybl = parts[partition]["keyblock"]
+
+            # Make sure bzImage exists
+            k_bZ = os.path.abspath(k_bZ)
+
+            if os.path.exists(k_bZ):
+                print(f">>> Found bZImage at {k_bZ} with config: {k_conf}")
+            else:
+                print(f">>> Could not find bZImage at {k_bZ}. Exiting...")
+                return
+
+            print(f">>> Scanning keys in {key_dir}...")
+            
+            # Make sure keys are there
+            k_signp = os.path.abspath(os.path.join(key_dir, k_signp))
+            k_signp += ".vbprivk"
+            k_keybl = os.path.abspath(os.path.join(key_dir, k_keybl))
+            k_keybl += ".keyblock"
+
+            if os.path.exists(k_signp):
+                print(f">>> Found private key at {k_signp}")
+            else:
+                print(f">>> Could not find private key at {k_signp}. Exiting...")
+                return
+
+            if os.path.exists(k_keybl):
+                print(f">>> Found keyblock at {k_keybl}")
+            else:
+                print(f">>> Could not find keyblock at {k_keybl}. Exiting...")
+                return
+
+            olddir = os.getcwd()
+            os.chdir(KERNEL_PACKAGE_DIR)
+
+            print(f">>> Generating bootloader stub...", end='')
+            out = subprocess.run(["dd", "if=/dev/zero", "of=bootloader.bin", "bs=1K", "count=1"], capture_output = True)
+            
+            if out.returncode == 0:
+                print(" done.")
+            else:
+                print(" error:")
+                print(f">>> {out.stderr.decode('utf-8')}")
+                print(">>> Exiting...")
+                return
+
+            with open("config.txt", "w") as f:
+                f.write(k_conf)
+
+            print(f">>> Generating kernel image...", end='')
+
+            # for some reason subprocess does not work here?
+            os.system(f"futility vbutil_kernel --pack {partition} --keyblock {k_keybl} --signprivate {k_signp} --version 1 --vmlinuz {k_bZ} --bootloader bootloader.bin --config config.txt")
+
+            print(f">>> Truncating {partition} to {p_size * 512} bytes")
+    
+            # truncate to size
+            subprocess.run(["truncate", "-s", str(p_size * 512), partition])
+
+            print(f">>> Copying {partition} to {olddir}")
+
+            shutil.move(partition, olddir)
+            
+
 
 def create_device_layout(device, parts):
 
@@ -241,6 +317,7 @@ if __name__ == '__main__':
 
     parser.add_argument('-g', '--generate-keys', action = 'store_true', help = f'Generate keys based on {KERNELTOOL_CONFIG}')
     parser.add_argument('-p', '--device-layout', metavar = 'DEVICE', nargs = 1, action = 'store', help = f"Generate layout file for formatting the specified device (i.e. /dev/sda) based on {KERNELTOOL_CONFIG}")
+    parser.add_argument('-k', '--kernel', action = 'store_true', help = f'Generate the kernel files specified in {KERNELTOOL_CONFIG}')
 
     args = parser.parse_args()
 
@@ -254,3 +331,7 @@ if __name__ == '__main__':
 
         create_device_layout(args.device_layout,
                              config['PARTITIONS'])
+
+    elif args.kernel:
+
+        gen_kernel_files(config['VERIFIED_BOOT']['key_dir'], config['PARTITIONS'])
