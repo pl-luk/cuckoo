@@ -173,9 +173,34 @@ def gen_kernel_files(key_dir, parts):
 
             print(f">>> Copying {partition} to {olddir}")
 
-            shutil.move(partition, olddir)
-            
+            shutil.move(os.path.abspath(partition), os.path.join(olddir, partition))
 
+def update_kernel_files(key_dir, parts):
+
+    os.chdir(KERNEL_PACKAGE_DIR)
+    gen_kernel_files(key_dir, parts)
+
+    for partition in parts:
+
+        p_type = parts[partition]["type"]
+
+        # Process only kernel partitions
+        if p_type == 'kernel' or p_type == guids['kernel']:
+
+            k_update = parts[partition]["update_path"]
+
+            print(f">>> Writing {partition} to {k_update}...")
+
+            out = subprocess.run(["dd", f"if={partition}", f"of={k_update}"], capture_output = True)
+            
+            if out.returncode == 0:
+                print(" done.")
+            else:
+                print(" error:")
+                print(f">>> {out.stderr.decode('utf-8')}")
+                print(">>> Exiting...")
+                return
+    
 
 def create_device_layout(device, parts):
 
@@ -318,12 +343,13 @@ if __name__ == '__main__':
     parser.add_argument('-g', '--generate-keys', action = 'store_true', help = f'Generate keys based on {KERNELTOOL_CONFIG}')
     parser.add_argument('-p', '--device-layout', metavar = 'DEVICE', nargs = 1, action = 'store', help = f"Generate layout file for formatting the specified device (i.e. /dev/sda) based on {KERNELTOOL_CONFIG}")
     parser.add_argument('-k', '--kernel', action = 'store_true', help = f'Generate the kernel files specified in {KERNELTOOL_CONFIG}')
+    parser.add_argument('-u', '--update-kernels', action = 'store_true', help = f'(Re)Generate kernel files and write to partition specified in update_path tag')
 
     args = parser.parse_args()
 
     if args.generate_keys:
         
-        gen_keys(config['VERIFIED_BOOT']['key_dir'], 
+        gen_keys(os.path.abspath(config['VERIFIED_BOOT']['key_dir']), 
                  config['VERIFIED_BOOT']['KEYS'],
                  config['VERIFIED_BOOT']['KEYBLOCKS'])
 
@@ -334,4 +360,8 @@ if __name__ == '__main__':
 
     elif args.kernel:
 
-        gen_kernel_files(config['VERIFIED_BOOT']['key_dir'], config['PARTITIONS'])
+        gen_kernel_files(os.path.abspath(config['VERIFIED_BOOT']['key_dir']), config['PARTITIONS'])
+
+    elif args.update_kernels:
+
+        update_kernel_files(os.path.abspath(config['VERIFIED_BOOT']['key_dir']), config['PARTITIONS'])
