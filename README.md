@@ -1,6 +1,9 @@
 # cuckoo
 A tool to make managing linux installations on chromebooks easier.
 
+## Installation
+Just use the `make install` command to install cuckoo. To uninstall use `make uninstall`.
+
 ## Functionality
 ### Key generation
 If you want to resign your firmware and install linux on your chrome os device you will require custom keys (except you want to use developer mode). By specifying the keys you want to generate in the `/etc/cuckoo.ini` file cuckoo can automatically output the desired keys. This is achieved by executing `cuckoo -g` (or `sudo cuckoo -g` if the key directory is only writable by the root user). The default configuration file includes a key layout as described in https://github.com/pl-luk/linuxbook which is sufficient for resigning the firmware and running a custom kernel in secure mode.
