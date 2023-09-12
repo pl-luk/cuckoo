@@ -1,6 +1,8 @@
 #!/usr/bin/python3
+# PYTHON_ARGCOMPLETE_OK
 
 import argparse
+import argcomplete
 import os
 import shutil
 import sys
@@ -345,6 +347,7 @@ if __name__ == '__main__':
     parser.add_argument('-k', '--kernel', action = 'store_true', help = f'Generate the kernel files specified in {KERNELTOOL_CONFIG}')
     parser.add_argument('-u', '--update-kernels', action = 'store_true', help = f'(Re)Generate kernel files and write to partition specified in update_path tag')
 
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
     if args.generate_keys:
