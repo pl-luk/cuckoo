@@ -1,9 +1,12 @@
+DESTDIR=/
 
 install:
-	cp ./cuckoo /usr/bin/cuckoo
-	cp ./cuckoo.ini /etc/cuckoo.ini
+	mkdir -p $(DESTDIR)/usr/bin
+	mkdir -p $(DESTDIR)/etc
+	cp ./cuckoo $(DESTDIR)/usr/bin/cuckoo
+	cp ./cuckoo.ini $(DESTDIR)/etc/cuckoo.ini
 
 uninstall:
 
-	rm /usr/bin/cuckoo
-	rm /etc/cuckoo.ini
+	rm $(DESTDIR)/usr/bin/cuckoo
+	rm $(DESTDIR)/etc/cuckoo.ini
