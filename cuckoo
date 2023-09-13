@@ -8,6 +8,7 @@ import datetime
 import subprocess
 import math
 
+from cryptography import x509
 from configobj import ConfigObj
 
 # Config file path
@@ -44,6 +45,79 @@ guids = {'kernel': 'FE3A2A5D-4F32-41A7-B725-ACCC3285A309',
          'luks': 'CA7D7CCB-63ED-4C53-861C-1742536059CC',
          'efi': 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B'}
 
+# Port of vboot_reference dumpRSAPublicKey utility as it is not always available on some distros even if
+# futility is present => just a reimplementation => need cleanup
+def dumpRSAPublicKey(cert_file, keyb_file):
+
+    with open(cert_file, "rb") as f:
+
+        cert = x509.load_pem_x509_certificate(f.read())
+
+        if not cert:
+            print(f">>> Could not load certificate {cert_file}. Exiting...")
+            return False
+
+        pubkey = cert.public_key()
+
+        if dumpRSA_check(pubkey):
+            dumpRSA_output(pubkey, keyb_file)
+            return True
+
+        return False
+
+def dumpRSA_check(pubkey):
+
+    # Equivalent to
+    # public_exponent = BN_get_word(e);
+    # modulus = BN_num_bits(n);
+    public_exponent = pubkey.public_numbers().e
+    modulus = pubkey.key_size
+
+    if public_exponent != 3 and public_exponent != 65537:
+        print(f">>> Warning: Public exponent should be 3 or 65537 (but is {public_exponent}).")
+
+    if modulus != 1024 and modulus != 2048 and modulus != 3072 and modulus != 4096 and modulus != 8192:
+        print(f">>> Error: Unknown modulus length = {modulus}. Exiting...")
+        return False
+
+    return True
+
+
+def dumpRSA_output(pubkey, keyb_file):
+
+    with open(keyb_file, "wb") as f:
+
+        # Output size of RSA key in 32-bit words
+        nwords = int(pubkey.key_size / 32)
+        f.write(nwords.to_bytes(4, 'little'))
+
+        N = pubkey.public_numbers().n
+        B = 2 ** 32
+
+        # Calculate and output the modular multiplicative inverse (- BN_mod_inverse(...))
+        n0invout = B - pow(N, -1, B)
+        f.write(n0invout.to_bytes(4, 'little'))
+
+        # Calculate R = 2^(# of key bits)
+        # The biggest calculation to be done here is 2 ** 8192 which can be handled by python's bignum
+        R = 2 ** pubkey.key_size
+        RR = (R ** 2) % N
+
+        # Write out modulus as little endian array of integers.
+        for i in range(nwords):
+
+            nout = int(N % B)
+            f.write(nout.to_bytes(4, 'little'))
+
+            N >>= 32
+
+        # Write R^2 as little endian array of integers.
+        for i in range(nwords):
+
+            rrout = int(RR % B)
+            f.write(rrout.to_bytes(4, 'little'))
+
+            RR >>= 32
 
 # Function to generate keys
 def gen_keys(key_dir, keys, keyblocks):
@@ -72,8 +146,8 @@ def gen_keys(key_dir, keys, keyblocks):
         subprocess.run(["openssl", "req", "-batch", "-new", "-x509", "-key", f"{key}.pem", "-out", f"{key}.crt"], check = True)
 
         # Generate pre-processed RSA public_key
-        with open(f"{key}.keyb", "wb") as f:
-            subprocess.run(["dumpRSAPublicKey", "-cert", f"{key}.crt"], stdout = f, check = True)
+        if not dumpRSAPublicKey(f"{key}.crt", f"{key}.keyb"):
+            return
 
         # "calculate" algorithm id for key packing
         alg = alg_ids[f"RSA{keys[key]['RSA_length']} {keys[key]['hash_alg']}"]
