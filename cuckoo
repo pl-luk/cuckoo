@@ -49,59 +49,69 @@ guids = {'kernel': 'FE3A2A5D-4F32-41A7-B725-ACCC3285A309',
 
 # Port of vboot_reference dumpRSAPublicKey utility as it is not always available on some distros even if
 # futility is present => just a reimplementation => need cleanup
-def dumpRSAPublicKey(public_key, keyb_file):
+def dumpRSAPublicKey(public_key, fd):
 
-    if dumpRSA_check(public_key):
-        dumpRSA_output(public_key, keyb_file)
+    # We only need to check for modulus because public exponent is hardcoded
+    valid_moduli = [1024, 2048, 3072, 4096, 8192]
 
-def dumpRSA_check(pubkey):
+    if public_key.key_size in valid_moduli:
+        dumpRSA_output(public_key, fd)
+    else:
+        print(f">>> Error: Unknown modulus length = {public_key.key_size}. Exiting...")
 
-    # We only need to check if modulus is correct because we have hardcoded the public exponent
-    modulus = pubkey.key_size
+def dumpRSA_output(pubkey, f):
 
-    if modulus != 1024 and modulus != 2048 and modulus != 3072 and modulus != 4096 and modulus != 8192:
-        print(f">>> Error: Unknown modulus length = {modulus}. Exiting...")
-        return False
+    # Output size of RSA key in 32-bit words
+    nwords = int(pubkey.key_size / 32)
+    f.write(nwords.to_bytes(4, 'little'))
 
-    return True
+    N = pubkey.public_numbers().n
+    B = 2 ** 32
 
+    # Calculate and output the modular multiplicative inverse (- BN_mod_inverse(...))
+    n0invout = B - pow(N, -1, B)
+    f.write(n0invout.to_bytes(4, 'little'))
 
-def dumpRSA_output(pubkey, keyb_file):
+    # Calculate R = 2^(# of key bits)
+    # The biggest calculation to be done here is 2 ** 8192 which can be handled by python's bignum
+    R = 2 ** pubkey.key_size
+    RR = (R ** 2) % N
 
-    with open(keyb_file, "wb") as f:
+    # Write out modulus as little endian array of integers.
+    for i in range(nwords):
 
-        # Output size of RSA key in 32-bit words
-        nwords = int(pubkey.key_size / 32)
-        f.write(nwords.to_bytes(4, 'little'))
+        nout = int(N % B)
+        f.write(nout.to_bytes(4, 'little'))
 
-        N = pubkey.public_numbers().n
-        B = 2 ** 32
+        N >>= 32
 
-        # Calculate and output the modular multiplicative inverse (- BN_mod_inverse(...))
-        n0invout = B - pow(N, -1, B)
-        f.write(n0invout.to_bytes(4, 'little'))
+    # Write R^2 as little endian array of integers.
+    for i in range(nwords):
 
-        # Calculate R = 2^(# of key bits)
-        # The biggest calculation to be done here is 2 ** 8192 which can be handled by python's bignum
-        R = 2 ** pubkey.key_size
-        RR = (R ** 2) % N
+        rrout = int(RR % B)
+        f.write(rrout.to_bytes(4, 'little'))
 
-        # Write out modulus as little endian array of integers.
-        for i in range(nwords):
+        RR >>= 32
 
-            nout = int(N % B)
-            f.write(nout.to_bytes(4, 'little'))
+# Dummy functions for later reimplementation in python without subprocess
+def generate_rsa_keypair(rsa_length):
 
-            N >>= 32
+    return rsa.generate_private_key(
+            public_exponent = 65537,
+            key_size = rsa_length
+        )
 
-        # Write R^2 as little endian array of integers.
-        for i in range(nwords):
+def pack_public_key(key_name, algorithm):
+    subprocess.run(["futility", "vbutil_key", "--pack", f"{key_name}.vbpubk",
+                    "--key", f"{key_name}.keyb", "--version", "1", "--algorithm", f"{algorithm}"], check = True)
 
-            rrout = int(RR % B)
-            f.write(rrout.to_bytes(4, 'little'))
+def pack_private_key(key_name, algorithm):
+    subprocess.run(["futility", "vbutil_key", "--pack", f"{key_name}.vbprivk",
+                    "--key", f"{key_name}.pem", "--algorithm", f"{algorithm}"], stderr = subprocess.DEVNULL, check = True)
 
-            RR >>= 32
-
+def pack_keyblock(block_name, flags, datapubkey, signprivate):
+    subprocess.run(["futility", "vbutil_keyblock", "--pack", f"{block_name}.keyblock", "--flags", f"{flags}", "--datapubkey",
+                        f"{datapubkey}.vbpubk", "--signprivate", f"{signprivate}.vbprivk"], check = True)
 # Function to generate keys
 def gen_keys(key_dir, keys, keyblocks):
 
@@ -119,16 +129,13 @@ def gen_keys(key_dir, keys, keyblocks):
 
     for key in keys:
 
-
         # Generate RSA keypair
         print(f">>> Generating RSA keypair: {key}")
+        rsa_key = generate_rsa_keypair(int(keys[key]['RSA_length']))
+        
 
-        rsa_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=int(keys[key]['RSA_length'])
-        )
-
-        # Serialize private key
+        # Serialize private key => after reimplementation this can be deleted as we want to work
+        # only with internal types
         with open(f"{key}.pem", "wb") as f:
             f.write(rsa_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
@@ -137,18 +144,19 @@ def gen_keys(key_dir, keys, keyblocks):
             ))
 
         # Generate pre-processed RSA public_key
-        dumpRSAPublicKey(rsa_key.public_key(), f"{key}.keyb")
+        with open(f"{key}.keyb", "wb") as f:
+            dumpRSAPublicKey(rsa_key.public_key(), f)
 
         # "calculate" algorithm id for key packing
         alg = alg_ids[f"RSA{keys[key]['RSA_length']} {keys[key]['hash_alg']}"]
 
         # generate public key
         print(f">>> Packing public key: {key}.vbpubk")
-        subprocess.run(["futility", "vbutil_key", "--pack", f"{key}.vbpubk", "--key", f"{key}.keyb", "--version", "1", "--algorithm", f"{alg}"], check = True)
-
+        pack_public_key(key, alg)
+                
         # generate private key
         print(f">>> Packing private key: {key}.vbprivk")
-        subprocess.run(["futility", "vbutil_key", "--pack", f"{key}.vbprivk", "--key", f"{key}.pem", "--algorithm", f"{alg}"], stderr = subprocess.DEVNULL, check = True)
+        pack_private_key(key, alg)
 
         # move all pubk and privk files to the keys dir
         shutil.move(f"{key}.vbpubk", '../')
@@ -159,8 +167,7 @@ def gen_keys(key_dir, keys, keyblocks):
     # Generate keyblocks
     for keyblock in keyblocks:
         print(f">>> Generating keyblock: {keyblock}.keyblock")
-        subprocess.run(["futility", "vbutil_keyblock", "--pack", f"{keyblock}.keyblock", "--flags", f"{keyblocks[keyblock]['flags']}", "--datapubkey",
-                        f"{keyblocks[keyblock]['datapubkey']}.vbpubk", "--signprivate", f"{keyblocks[keyblock]['signprivate']}.vbprivk"], check = True)
+        pack_keyblock(keyblock, keyblocks[keyblock]['flags'], keyblocks[keyblock]['datapubkey'], keyblocks[keyblock]['signprivate'])
 
 def gen_kernel_files(key_dir, parts):
 
