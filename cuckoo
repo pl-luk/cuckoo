@@ -9,6 +9,8 @@ import subprocess
 import math
 
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from configobj import ConfigObj
 
 # Config file path
@@ -47,34 +49,15 @@ guids = {'kernel': 'FE3A2A5D-4F32-41A7-B725-ACCC3285A309',
 
 # Port of vboot_reference dumpRSAPublicKey utility as it is not always available on some distros even if
 # futility is present => just a reimplementation => need cleanup
-def dumpRSAPublicKey(cert_file, keyb_file):
+def dumpRSAPublicKey(public_key, keyb_file):
 
-    with open(cert_file, "rb") as f:
-
-        cert = x509.load_pem_x509_certificate(f.read())
-
-        if not cert:
-            print(f">>> Could not load certificate {cert_file}. Exiting...")
-            return False
-
-        pubkey = cert.public_key()
-
-        if dumpRSA_check(pubkey):
-            dumpRSA_output(pubkey, keyb_file)
-            return True
-
-        return False
+    if dumpRSA_check(public_key):
+        dumpRSA_output(public_key, keyb_file)
 
 def dumpRSA_check(pubkey):
 
-    # Equivalent to
-    # public_exponent = BN_get_word(e);
-    # modulus = BN_num_bits(n);
-    public_exponent = pubkey.public_numbers().e
+    # We only need to check if modulus is correct because we have hardcoded the public exponent
     modulus = pubkey.key_size
-
-    if public_exponent != 3 and public_exponent != 65537:
-        print(f">>> Warning: Public exponent should be 3 or 65537 (but is {public_exponent}).")
 
     if modulus != 1024 and modulus != 2048 and modulus != 3072 and modulus != 4096 and modulus != 8192:
         print(f">>> Error: Unknown modulus length = {modulus}. Exiting...")
@@ -138,16 +121,23 @@ def gen_keys(key_dir, keys, keyblocks):
 
 
         # Generate RSA keypair
-        print(f">>> Generating RSA keypair: {key}.pem")
-        subprocess.run(["openssl", "genrsa", "-F4", "-out", f"{key}.pem", f"{keys[key]['RSA_length']}"], check = True)
+        print(f">>> Generating RSA keypair: {key}")
 
-        # Generate cert
-        print(f">>> Generating certificate: {key}.crt")
-        subprocess.run(["openssl", "req", "-batch", "-new", "-x509", "-key", f"{key}.pem", "-out", f"{key}.crt"], check = True)
+        rsa_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=int(keys[key]['RSA_length'])
+        )
+
+        # Serialize private key
+        with open(f"{key}.pem", "wb") as f:
+            f.write(rsa_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
 
         # Generate pre-processed RSA public_key
-        if not dumpRSAPublicKey(f"{key}.crt", f"{key}.keyb"):
-            return
+        dumpRSAPublicKey(rsa_key.public_key(), f"{key}.keyb")
 
         # "calculate" algorithm id for key packing
         alg = alg_ids[f"RSA{keys[key]['RSA_length']} {keys[key]['hash_alg']}"]
