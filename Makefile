@@ -1,5 +1,8 @@
 DESTDIR=/
 
+test:
+	cd ./tests; python3 -m unittest -v
+
 install:
 	mkdir -p $(DESTDIR)/usr/bin
 	mkdir -p $(DESTDIR)/etc
