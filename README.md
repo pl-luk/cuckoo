@@ -16,3 +16,6 @@ With the `cuckoo -k` command kernel partition files can easily be created. To do
 
 ## Configuration
 A guide to configure cuckoo via the configuration file is found in the configuration file typically located at `/etc/cuckoo.ini`
+
+## Testing
+To run the unittests just execute `make test`.
