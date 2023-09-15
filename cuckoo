@@ -399,14 +399,6 @@ def create_device_layout(device, parts):
 
 if __name__ == '__main__':
 
-    # Handle configuration
-    config = ConfigObj(KERNELTOOL_CONFIG)
-
-    if not os.path.exists(KERNELTOOL_CONFIG):
-        
-        # Create default config
-        pass
-
     # Handle argparse
     parser = argparse.ArgumentParser(prog = "cuckoo",
                                      description = "A tool to make managing linux installations on chromebooks easier")
@@ -420,8 +412,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.config:
-        print(f">>> Using alternate config file: {KERNELTOOL_CONFIG}")
         KERNELTOOL_CONFIG = os.path.abspath(args.config[0])
+        print(f">>> Using alternate config file: {KERNELTOOL_CONFIG}")
+
+    # Handle configuration
+    config = ConfigObj(KERNELTOOL_CONFIG)
+
+    if not os.path.exists(KERNELTOOL_CONFIG):
+        
+        # Create default config
+        pass
 
     if args.generate_keys:
         
