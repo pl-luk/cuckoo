@@ -420,7 +420,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.config:
-        print(f">>> Using alternate config file: {KERNELTOOL_CONFIG}"
+        print(f">>> Using alternate config file: {KERNELTOOL_CONFIG}")
         KERNELTOOL_CONFIG = os.path.abspath(args.config[0])
 
     if args.generate_keys:
