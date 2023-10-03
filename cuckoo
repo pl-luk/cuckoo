@@ -47,6 +47,31 @@ guids = {'kernel': 'FE3A2A5D-4F32-41A7-B725-ACCC3285A309',
          'luks': 'CA7D7CCB-63ED-4C53-861C-1742536059CC',
          'efi': 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B'}
 
+# Port of the firmware resigning part of sign_official_build.sh from vboot_reference
+def resign_firmware_image(firmware_data_key, firmware_keyblock, kernel_subkey, root_key, recovery_key, in_img, out_img, key_dir):
+
+    firmware_data_key = os.path.join(key_dir, firmware_data_key)
+    firmware_keyblock = os.path.join(key_dir, firmware_keyblock)
+    kernel_subkey = os.path.join(key_dir, kernel_subkey)
+    root_key = os.path.join(key_dir, root_key)
+    recovery_key = os.path.join(key_dir, recovery_key)
+
+    print(f">>> Signing firmware {in_img}...")
+    sign_firmware(firmware_data_key, firmware_keyblock, kernel_subkey, in_img, "/tmp/temp_fw.rom")
+    print(">>> Changing root key and recovey key in gbb...")
+    gbb_update(root_key, recovery_key, "/tmp/temp_fw.rom", out_img)
+
+# Just helper functions that call subprocess because we want to implement this here in the future instead of calling
+# google scripts
+def sign_firmware(firmware_data_key, firmware_keyblock, kernel_subkey, in_img, out_img):
+    subprocess.run(["futility", "sign", "--signprivate", f"{firmware_data_key}.vbprivk",
+                    "--keyblock", f"{firmware_keyblock}.keyblock", "--kernelkey", f"{kernel_subkey}.vbpubk",
+                    "-v", "1", in_img, out_img], check = True)
+
+def gbb_update(root_key, recovery_key, in_img, out_img):
+    subprocess.run(["futility", "gbb", "-s", "--recoverykey", f"{recovery_key}.vbpubk", "--rootkey", f"{root_key}.vbpubk",
+                    in_img, out_img], check = True)
+
 # Port of vboot_reference dumpRSAPublicKey utility as it is not always available on some distros even if
 # futility is present => just a reimplementation => need cleanup
 def dumpRSAPublicKey(public_key, fd):
@@ -407,6 +432,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--device-layout', metavar = 'DEVICE', nargs = 1, action = 'store', help = f"Generate layout file for formatting the specified device (i.e. /dev/sda) based on {KERNELTOOL_CONFIG}")
     parser.add_argument('-k', '--kernel', action = 'store_true', help = f'Generate the kernel files specified in {KERNELTOOL_CONFIG}')
     parser.add_argument('-u', '--update-kernels', action = 'store_true', help = f'(Re)Generate kernel files and write to partition specified in update_path tag')
+    parser.add_argument('-f', '--update-firmware', action = 'store_true', help = f'Read the firmware, resign it and write it back to the chip as specified in {KERNELTOOL_CONFIG}')
     parser.add_argument('-c', '--config', nargs = 1, action = 'store', help = "Specify an alternate config file")
 
     args = parser.parse_args()
@@ -441,3 +467,25 @@ if __name__ == '__main__':
     elif args.update_kernels:
 
         update_kernel_files(os.path.abspath(config['VERIFIED_BOOT']['key_dir']), config['PARTITIONS'])
+
+    elif args.update_firmware:
+        
+        if "read_cmd" in config['FIRMWARE']:
+            if config['FIRMWARE']['read_cmd'] != "":
+                subprocess.run(config['FIRMWARE']['read_cmd'].split(" "), check = True)
+
+        firmware_data_key = config['FIRMWARE']['firmware_data_key']
+        firmware_keyblock = config['FIRMWARE']['firmware_keyblock']
+        kernel_subkey = config['FIRMWARE']['kernel_subkey']
+        root_key = config['FIRMWARE']['root_key']
+        recovery_key = config['FIRMWARE']['recovery_key']
+        key_dir = os.path.abspath(config['VERIFIED_BOOT']['key_dir'])
+
+        in_img = os.path.abspath(config['FIRMWARE']['in_fw'])
+        out_img = os.path.abspath(config['FIRMWARE']['out_fw'])
+
+        resign_firmware_image(firmware_data_key, firmware_keyblock, kernel_subkey, root_key, recovery_key, in_img, out_img, key_dir)
+
+        if "write_cmd" in config['FIRMWARE']:
+            if config['FIRMWARE']['write_cmd'] != "":
+                subprocess.run(config['FIRMWARE']['write_cmd'].split(" "), check = True)
