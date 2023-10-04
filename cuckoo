@@ -48,7 +48,7 @@ guids = {'kernel': 'FE3A2A5D-4F32-41A7-B725-ACCC3285A309',
          'efi': 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B'}
 
 # Port of the firmware resigning part of sign_official_build.sh from vboot_reference
-def resign_firmware_image(firmware_data_key, firmware_keyblock, kernel_subkey, root_key, recovery_key, in_img, out_img, key_dir):
+def resign_firmware_image(firmware_data_key, firmware_keyblock, kernel_subkey, root_key, recovery_key, version, in_img, out_img, key_dir):
 
     firmware_data_key = os.path.join(key_dir, firmware_data_key)
     firmware_keyblock = os.path.join(key_dir, firmware_keyblock)
@@ -57,16 +57,16 @@ def resign_firmware_image(firmware_data_key, firmware_keyblock, kernel_subkey, r
     recovery_key = os.path.join(key_dir, recovery_key)
 
     print(f">>> Signing firmware {in_img}...")
-    sign_firmware(firmware_data_key, firmware_keyblock, kernel_subkey, in_img, "/tmp/temp_fw.rom")
+    sign_firmware(firmware_data_key, firmware_keyblock, kernel_subkey, version, in_img, "/tmp/temp_fw.rom")
     print(">>> Changing root key and recovey key in gbb...")
     gbb_update(root_key, recovery_key, "/tmp/temp_fw.rom", out_img)
 
 # Just helper functions that call subprocess because we want to implement this here in the future instead of calling
 # google scripts
-def sign_firmware(firmware_data_key, firmware_keyblock, kernel_subkey, in_img, out_img):
+def sign_firmware(firmware_data_key, firmware_keyblock, kernel_subkey, version, in_img, out_img):
     subprocess.run(["futility", "sign", "--signprivate", f"{firmware_data_key}.vbprivk",
                     "--keyblock", f"{firmware_keyblock}.keyblock", "--kernelkey", f"{kernel_subkey}.vbpubk",
-                    "-v", "1", in_img, out_img], check = True)
+                    "-v", version, in_img, out_img], check = True)
 
 def gbb_update(root_key, recovery_key, in_img, out_img):
     subprocess.run(["futility", "gbb", "-s", "--recoverykey", f"{recovery_key}.vbpubk", "--rootkey", f"{root_key}.vbpubk",
@@ -210,6 +210,7 @@ def gen_kernel_files(key_dir, parts):
             k_conf = parts[partition]["config"]
             k_signp = parts[partition]["signprivate"]
             k_keybl = parts[partition]["keyblock"]
+            k_version = parts[partition]["version"]
 
             # Make sure bzImage exists
             k_bZ = os.path.abspath(k_bZ)
@@ -260,7 +261,7 @@ def gen_kernel_files(key_dir, parts):
             print(f">>> Generating kernel image...", end='')
 
             # for some reason subprocess does not work here?
-            os.system(f"futility vbutil_kernel --pack {partition} --keyblock {k_keybl} --signprivate {k_signp} --version 1 --vmlinuz {k_bZ} --bootloader bootloader.bin --config config.txt")
+            os.system(f"futility vbutil_kernel --pack {partition} --keyblock {k_keybl} --signprivate {k_signp} --version {k_version} --vmlinuz {k_bZ} --bootloader bootloader.bin --config config.txt")
 
             print(f">>> Truncating {partition} to {p_size * 512} bytes")
     
@@ -481,10 +482,12 @@ if __name__ == '__main__':
         recovery_key = config['FIRMWARE']['recovery_key']
         key_dir = os.path.abspath(config['VERIFIED_BOOT']['key_dir'])
 
+        version = config['FIRMWARE']['version']
+
         in_img = os.path.abspath(config['FIRMWARE']['in_fw'])
         out_img = os.path.abspath(config['FIRMWARE']['out_fw'])
 
-        resign_firmware_image(firmware_data_key, firmware_keyblock, kernel_subkey, root_key, recovery_key, in_img, out_img, key_dir)
+        resign_firmware_image(firmware_data_key, firmware_keyblock, kernel_subkey, root_key, recovery_key, version, in_img, out_img, key_dir)
 
         if "write_cmd" in config['FIRMWARE']:
             if config['FIRMWARE']['write_cmd'] != "":
