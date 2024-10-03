@@ -246,6 +246,10 @@ def gen_kernel_files(key_dir, parts):
             os.chdir(KERNEL_PACKAGE_DIR)
 
             print(f">>> Generating bootloader stub...", end='')
+            if os.path.exists("bootloader.bin"):
+                print(f"\n>>> Found existing bootloader.bin. Recreating...", end = '')
+                os.remove("bootloader.bin")
+
             out = subprocess.run(["dd", "if=/dev/zero", "of=bootloader.bin", "bs=1K", "count=1"], capture_output = True)
             
             if out.returncode == 0:
@@ -256,10 +260,19 @@ def gen_kernel_files(key_dir, parts):
                 print(">>> Exiting...")
                 sys.exit()
 
+            print(">>> Writing kernel parameters to config.txt...")
+            if os.path.exists("config.txt"):
+                print(f">>> Found existing config.txt. Recreating...", end = '')
+                os.remove("config.txt")
+
             with open("config.txt", "w") as f:
                 f.write(k_conf)
+            print(" done.")
 
-            print(f">>> Generating kernel image...", end='')
+            print(f">>> Generating kernel image...")
+            if os.path.exists(f"{partition}"):
+                print(f"\n>>> Found existing partition image ({partition}). Recreating...")
+                os.remove(f"{partition}")
 
             # for some reason subprocess does not work here?
             os.system(f"futility vbutil_kernel --pack {partition} --keyblock {k_keybl} --signprivate {k_signp} --version {k_version} --vmlinuz {k_bZ} --bootloader bootloader.bin --config config.txt")
