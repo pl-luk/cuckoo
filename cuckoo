@@ -83,6 +83,7 @@ def dumpRSAPublicKey(public_key, fd):
         dumpRSA_output(public_key, fd)
     else:
         print(f">>> Error: Unknown modulus length = {public_key.key_size}. Exiting...")
+        sys.exit()
 
 def dumpRSA_output(pubkey, f):
 
@@ -219,7 +220,7 @@ def gen_kernel_files(key_dir, parts):
                 print(f">>> Found bZImage at {k_bZ} with config: {k_conf}")
             else:
                 print(f">>> Could not find bZImage at {k_bZ}. Exiting...")
-                return
+                sys.exit()
 
             print(f">>> Scanning keys in {key_dir}...")
             
@@ -233,13 +234,13 @@ def gen_kernel_files(key_dir, parts):
                 print(f">>> Found private key at {k_signp}")
             else:
                 print(f">>> Could not find private key at {k_signp}. Exiting...")
-                return
+                sys.exit()
 
             if os.path.exists(k_keybl):
                 print(f">>> Found keyblock at {k_keybl}")
             else:
                 print(f">>> Could not find keyblock at {k_keybl}. Exiting...")
-                return
+                sys.exit()
 
             olddir = os.getcwd()
             os.chdir(KERNEL_PACKAGE_DIR)
@@ -253,7 +254,7 @@ def gen_kernel_files(key_dir, parts):
                 print(" error:")
                 print(f">>> {out.stderr.decode('utf-8')}")
                 print(">>> Exiting...")
-                return
+                sys.exit()
 
             with open("config.txt", "w") as f:
                 f.write(k_conf)
@@ -296,7 +297,7 @@ def update_kernel_files(key_dir, parts):
                 print(" error:")
                 print(f">>> {out.stderr.decode('utf-8')}")
                 print(">>> Exiting...")
-                return
+                sys.exit()
     
 
 def create_device_layout(device, parts):
