@@ -7,7 +7,7 @@ install:
 	mkdir -p $(DESTDIR)/usr/bin
 	mkdir -p $(DESTDIR)/etc
 	cp ./cuckoo $(DESTDIR)/usr/bin/cuckoo
-	cp ./cuckoo.ini $(DESTDIR)/etc/cuckoo.ini
+	cp -n ./cuckoo.ini $(DESTDIR)/etc/cuckoo.ini
 
 uninstall:
 
